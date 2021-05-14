@@ -3,6 +3,7 @@
 namespace App\Actions\Search;
 
 use AccessControl;
+use App\Actions\Album\Photos;
 use App\Actions\Albums\Extensions\PublicIds;
 use App\ModelFunctions\SymLinkFunctions;
 use App\Models\Configs;
@@ -20,9 +21,11 @@ class PhotoSearch
 	 * @param SymLinkFunctions $symLinkFunctions
 	 */
 	public function __construct(
-		SymLinkFunctions $symLinkFunctions
+		SymLinkFunctions $symLinkFunctions,
+		Photos $photosAction
 	) {
 		$this->symLinkFunctions = $symLinkFunctions;
+		$this->photosAction = $photosAction;
 	}
 
 	private function unsorted_or_public(Builder $query)
@@ -62,14 +65,6 @@ class PhotoSearch
 
 		$photos = $query->get();
 
-		return $photos->map(
-			function ($photo) {
-				$photo_array = $photo->toReturnArray();
-				$photo->urls($photo_array);
-				$this->symLinkFunctions->getUrl($photo, $photo_array);
-
-				return $photo_array;
-			}
-		);
+		return $this->photosAction->getPhotos($photos);
 	}
 }
