@@ -3,79 +3,38 @@
 namespace App\Actions\RSS;
 
 use App\Actions\Albums\Extensions\PublicIds;
-use App\ModelFunctions\SymLinkFunctions;
 use App\Models\Configs;
 use App\Models\Photo;
+use App\Models\SizeVariant;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Feed\FeedItem;
 
 class Generate
 {
-	/**
-	 * @var SymLinkFunctions
-	 */
-	private $symLinkFunctions;
-
-	/**
-	 * @param SymLinkFunctions $symLinkFunctions
-	 */
-	public function __construct(
-		SymLinkFunctions $symLinkFunctions
-	) {
-		$this->symLinkFunctions = $symLinkFunctions;
-	}
-
-	private function make_enclosure(array $photo_array)
-	{
-		$enclosure = new \stdClass();
-
-		$path = public_path($photo_array['url']);
-		$enclosure->length = File::size($path);
-		$enclosure->mime_type = File::mimeType($path);
-		$enclosure->url = url('/' . $photo_array['url']);
-
-		return $enclosure;
-	}
-
-	private function create_link(Photo $photo_model, array &$photo_array)
+	private function create_link_to_page(Photo $photo_model): string
 	{
 		if ($photo_model->album_id != null) {
-			if (!$photo_model->album->is_full_photo_visible()) {
-				$photo_model->downgrade($photo_array);
-			}
-
-			return '#' . $photo_model->album_id . '/' . $photo_model->id;
+			return url('/#' . $photo_model->album_id . '/' . $photo_model->id);
 		}
 
-		if (Configs::get_value('full_photo', '1') != '1') {
-			$photo_model->downgrade($photo_array);
-		}
-
-		return 'view?p=' . $photo_model->id;
+		return url('/view?p=' . $photo_model->id);
 	}
 
-	private function toFeedItem(Photo $photo_model)
+	private function toFeedItem(Photo $photo_model): FeedItem
 	{
-		$photo_array = $photo_model->toReturnArray();
-
-		$this->symLinkFunctions->getUrl($photo_model, $photo_array);
-
-		$photo_array['url'] = $photo_array['url'] ?: ($photo_array['medium2x'] ?: $photo_array['medium']);
-		// TODO: this will need to be fixed for s3 and when the upload folder is NOT the Lychee folder.
-		$enclosure = $this->make_enclosure($photo_array);
-
-		$id = $this->create_link($photo_model, $photo_array);
+		$page_link = $this->create_link_to_page($photo_model);
+		$sizeVariant = $photo_model->size_variants->getSizeVariant(SizeVariant::ORIGINAL);
 
 		return FeedItem::create([
-			'id' => url('/' . $id),
+			'id' => $page_link,
 			'title' => $photo_model->title,
-			'summary' => $photo_model->description,
+			'summary' => $photo_model->description ?? '',
 			'updated' => $photo_model->updated_at,
-			'link' => $photo_array['url'],
-			'enclosure' => $enclosure->url,
-			'enclosureLength' => $enclosure->length,
-			'enclosureType' => $enclosure->mime_type,
+			'link' => $page_link,
+			'enclosure' => $sizeVariant->url,
+			'enclosureLength' => Storage::size($sizeVariant->short_path),
+			'enclosureType' => $photo_model->type,
 			'author' => $photo_model->owner->username,
 		]);
 	}

@@ -8,7 +8,7 @@ use App\Actions\Photo\Archive;
 use App\Actions\Photo\Create;
 use App\Actions\Photo\Delete;
 use App\Actions\Photo\Duplicate;
-use App\Actions\Photo\Prepare;
+use App\Actions\Photo\Extensions\SourceFileInfo;
 use App\Actions\Photo\Random;
 use App\Actions\Photo\SetAlbum;
 use App\Actions\Photo\SetDescription;
@@ -17,20 +17,19 @@ use App\Actions\Photo\SetPublic;
 use App\Actions\Photo\SetStar;
 use App\Actions\Photo\SetTags;
 use App\Actions\Photo\SetTitle;
-use App\Exceptions\JsonError;
-use App\Exceptions\JsonWarning;
 use App\Facades\Helpers;
 use App\Http\Requests\AlbumRequests\AlbumIDRequest;
 use App\Http\Requests\PhotoRequests\PhotoIDRequest;
 use App\Http\Requests\PhotoRequests\PhotoIDsRequest;
 use App\ModelFunctions\SymLinkFunctions;
-use App\Models\Configs;
 use App\Models\Logs;
 use App\Models\Photo;
 use App\Response;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PhotoController extends Controller
@@ -54,23 +53,29 @@ class PhotoController extends Controller
 	 *
 	 * @param PhotoIDRequest $request
 	 *
-	 * @return ?array
+	 * @return Photo
 	 */
-	public function get(PhotoIDRequest $request, Prepare $prepare)
+	public function get(PhotoIDRequest $request): Photo
 	{
-		/** @var ?Photo $photo */
-		$photo = Photo::with('album')->findOrFail($request['photoID']);
+		try {
+			/** @var Photo $photo */
+			$photo = Photo::query()
+				->with('size_variants_raw')
+				->findOrFail($request['photoID']);
+		} catch (\Throwable $e) {
+			throw $e;
+		}
 
-		return $prepare->do($photo);
+		return $photo;
 	}
 
 	/**
 	 * Return a random public photo (starred)
 	 * This is used in the Frame Controller.
 	 *
-	 * @return array
+	 * @return Photo
 	 */
-	public function getRandom(Random $random)
+	public function getRandom(Random $random): Photo
 	{
 		return $random->do();
 	}
@@ -78,39 +83,26 @@ class PhotoController extends Controller
 	/**
 	 * Add a function given an AlbumID.
 	 *
-	 * @param Request $request
+	 * @param AlbumIDRequest $request
+	 * @param Create         $create
 	 *
-	 * @return false|string
+	 * @return Photo
 	 */
-	public function add(AlbumIDRequest $request, Create $create)
+	public function add(AlbumIDRequest $request, Create $create): Photo
 	{
-		try {
-			$request->validate(['0' => 'required']);
-		} catch (ValidationException $e) {
-			return Response::error('validation failed');
-		}
-
-		if (!$request->hasfile('0')) {
-			return Response::error('missing files');
-		}
-
+		$request->validate(['0' => 'required|file']);
 		// Only process the first photo in the array
+		/** @var UploadedFile $file */
 		$file = $request->file('0');
-
-		$nameFile = [];
-		$nameFile['name'] = $file->getClientOriginalName();
-		$nameFile['type'] = $file->getMimeType();
-		$nameFile['tmp_name'] = $file->getPathName();
-
-		try {
-			$res = $create->add($nameFile, $request['albumID'], false, (Configs::get_value('skip_duplicates', '0') === '1'));
-		} catch (JsonWarning $e) {
-			$res = $e->render();
-		} catch (JsonError $e) {
-			$res = $e->render();
+		$sourceFileInfo = new SourceFileInfo($file->getClientOriginalName(), $file->getMimeType(), $file->getPathName());
+		$albumID = $request['albumID'];
+		if (empty($albumID)) {
+			$albumID = 0;
+		} elseif (is_numeric($albumID)) {
+			$albumID = intval($albumID);
 		}
 
-		return $res;
+		return $create->add($sourceFileInfo, $albumID);
 	}
 
 	/**
@@ -196,54 +188,59 @@ class PhotoController extends Controller
 	}
 
 	/**
-	 * Define the license of the photo.
+	 * Sets the license of the photo.
 	 *
-	 * @param Request $request
+	 * @param PhotoIDRequest $request
+	 * @param SetLicense     $setLicense
 	 *
-	 * @return false|string
+	 * @return \Illuminate\Http\Response
 	 */
-	public function setLicense(PhotoIDRequest $request, SetLicense $setLicense)
+	public function setLicense(PhotoIDRequest $request, SetLicense $setLicense): \Illuminate\Http\Response
 	{
-		$request->validate(['license' => 'required|string']);
-
 		$licenses = Helpers::get_all_licenses();
+		$request->validate([
+			'license' => [
+				'string',
+				'required',
+				Rule::in($licenses),
+			],
+		]);
 
-		if (!in_array($request['license'], $licenses, true)) {
-			Logs::error(__METHOD__, __LINE__, 'License not recognised: ' . $request['license']);
+		$setLicense->do($request['photoID'], $request['license']);
 
-			return Response::error('License not recognised!');
-		}
-
-		return $setLicense->do($request['photoID'], $request['license']) ? 'true' : 'false';
+		return response()->noContent();
 	}
 
 	/**
-	 * Delete a photo.
+	 * Delete one or more photos.
 	 *
-	 * @param Request $request
+	 * @param PhotoIDsRequest $request
+	 * @param Delete          $delete
 	 *
-	 * @return string
+	 * @return \Illuminate\Http\Response
 	 */
-	public function delete(PhotoIDsRequest $request, Delete $delete)
+	public function delete(PhotoIDsRequest $request, Delete $delete): \Illuminate\Http\Response
 	{
-		return $delete->do(explode(',', $request['photoIDs'])) ? 'true' : 'false';
+		$delete->do(explode(',', $request['photoIDs']));
+
+		return response()->noContent();
 	}
 
 	/**
 	 * Duplicate a photo.
 	 * Only the SQL entry is duplicated for space reason.
 	 *
-	 * @param Request $request
+	 * @param PhotoIDsRequest $request
+	 * @param Duplicate       $duplicate
 	 *
-	 * @return string
+	 * @return Photo|Collection
 	 */
 	public function duplicate(PhotoIDsRequest $request, Duplicate $duplicate)
 	{
 		$request->validate(['albumID' => 'string']);
+		$duplicates = $duplicate->do(explode(',', $request['photoIDs']), $request['albumID'] ? intval($request['albumID']) : null);
 
-		$duplicate->do(explode(',', $request['photoIDs']), $request['albumID'] ?? null);
-
-		return 'true';
+		return ($duplicates->count() === 1) ? $duplicates->first() : $duplicates;
 	}
 
 	/**

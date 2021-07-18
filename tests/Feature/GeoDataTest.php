@@ -38,7 +38,7 @@ class GeoDataTest extends TestCase
 
 		$id = $photos_tests->upload($file);
 
-		$response = $photos_tests->get($id, 'true');
+		$response = $photos_tests->get($id);
 		$photos_tests->see_in_unsorted($id);
 		/*
 		 * Check some Exif data
@@ -57,8 +57,6 @@ class GeoDataTest extends TestCase
 			[
 				'id' => $id,
 				'title' => 'mongolia',
-				'width' => '1280',
-				'height' => '850',
 				'type' => 'image/jpeg',
 				'filesize' => 201316,
 				'iso' => '200',
@@ -71,10 +69,10 @@ class GeoDataTest extends TestCase
 				'license' => 'none',
 				'taken_at' => $taken_at->format(\DateTimeInterface::ATOM),
 				'taken_at_orig_tz' => $taken_at->getTimezone()->getName(),
-				'public' => '0',
-				'downloadable' => '1',
-				'share_button_visible' => '1',
-				'sizeVariants' => [
+				'public' => 0,
+				'downloadable' => true,
+				'share_button_visible' => true,
+				'size_variants' => [
 					'thumb' => [
 						'width' => 200,
 						'height' => 200,
@@ -85,12 +83,16 @@ class GeoDataTest extends TestCase
 					],
 					'medium' => null,
 					'medium2x' => null,
+					'original' => [
+						'width' => 1280,
+						'height' => 850,
+					],
 				],
 			]
 		);
 
 		$albumID = $albums_tests->add('0', 'test_mongolia');
-		$photos_tests->set_album($albumID, $id, 'true');
+		$photos_tests->set_album($albumID, $id);
 		$photos_tests->dont_see_in_unsorted($id);
 		$response = $albums_tests->get($albumID, '', 'true');
 		$content = $response->getContent();
@@ -130,7 +132,7 @@ class GeoDataTest extends TestCase
 		$this->assertEquals(1, count($array_content->photos));
 		$this->assertEquals($id, $array_content->photos[0]->id);
 
-		$photos_tests->delete($id, 'true');
+		$photos_tests->delete($id);
 		$albums_tests->delete($albumID);
 
 		// reset

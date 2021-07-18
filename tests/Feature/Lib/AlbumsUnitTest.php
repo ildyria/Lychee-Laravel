@@ -352,7 +352,6 @@ class AlbumsUnitTest
 			'albumID' => $id,
 			'show_tags' => $tags,
 		]);
-
 		$response->assertOk();
 		$response->assertSee($result);
 	}
@@ -385,7 +384,7 @@ class AlbumsUnitTest
 		string $id,
 		string $result = 'true'
 	) {
-		$response = $this->testCase->json('POST', '/api/Album::delete', ['albumIDs' => $id]);
+		$response = $this->testCase->postJson('/api/Album::delete', ['albumIDs' => $id]);
 		$response->assertOk();
 		$response->assertSee($result, false);
 	}

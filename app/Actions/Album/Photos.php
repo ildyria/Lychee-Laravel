@@ -2,23 +2,12 @@
 
 namespace App\Actions\Album;
 
-use App\Facades\AccessControl;
-use App\ModelFunctions\SymLinkFunctions;
 use App\Models\Album;
 use App\Models\Configs;
 use App\Models\Photo;
-use Illuminate\Database\Eloquent\Collection;
 
 class Photos
 {
-	/** @var SymLinkFunctions */
-	private $symLinkFunctions;
-
-	public function __construct(SymLinkFunctions $symLinkFunctions)
-	{
-		$this->symLinkFunctions = $symLinkFunctions;
-	}
-
 	/**
 	 * take a $photo_sql query and return an array containing their pictures.
 	 *
@@ -29,7 +18,7 @@ class Photos
 	public function get(Album $album): array
 	{
 		[$sortingCol, $sortingOrder] = $album->get_sort();
-		$photos_sql = $album->get_photos();
+		$photos_sql = $album->get_photos()->with('size_variants_raw');
 
 		$previousPhotoID = '';
 		$return_photos = [];
@@ -67,12 +56,6 @@ class Photos
 		foreach ($photos as $photo_model) {
 			// Turn data from the database into a front-end friendly format
 			$photo = $photo_model->toReturnArray();
-			$photo['license'] = $photo_model->get_license($album->get_license());
-
-			$this->symLinkFunctions->getUrl($photo_model, $photo);
-			if (!AccessControl::is_current_user($photo_model->owner_id) && !$album->is_full_photo_visible()) {
-				$photo_model->downgrade($photo);
-			}
 
 			// Set previous and next photoID for navigation purposes
 			$photo['previousPhoto'] = $previousPhotoID;
